@@ -1,15 +1,32 @@
 {
-  "name": "matroska-metadata",
   "version": "1.0.7",
-  "description": "",
+  "name": "@rockinchaos/matroska-metadata",
+  "license": "MIT",
+  "packageManager": "pnpm@10.34.1",
+  "description": "A lightweight Matroska/WebM metadata reader for Node.js and browsers, with EBML SeekHead-based metadata lookup.",
   "type": "module",
   "main": "src/index.js",
   "browser": {
     "zlib": "./src/inflateWeb.js"
   },
   "keywords": [],
-  "author": "ThaUnknown",
-  "license": "MIT",
+  "author": {
+    "name": "RockinChaos",
+    "url": "https://github.com/RockinChaos"
+  },
+  "contributors": [
+    {
+      "name": "ThaUnknown",
+      "url": "https://github.com/ThaUnknown"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RockinChaos/matroska-metadata.git"
+  },
+  "bugs": {
+    "url": "https://github.com/RockinChaos/matroska-metadata/issues"
+  },
   "dependencies": {
     "ebml-iterator": "^1.0.5",
     "fast-readable-async-iterator": "^1.1.1",
