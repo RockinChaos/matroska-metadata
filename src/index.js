@@ -1,7 +1,7 @@
 import { inflateSync } from 'zlib'
 
 import { arr2text, concat } from 'uint8-util'
-import { EbmlIteratorDecoder, EbmlTagId } from 'ebml-iterator'
+import { EbmlIteratorDecoder, EbmlTagId } from '@rockinchaos/ebml-iterator'
 import 'fast-readable-async-iterator'
 
 import Util from './util.js'
@@ -10,14 +10,14 @@ const SSA_TYPES = new Set(['ssa', 'ass'])
 const SSA_KEYS = ['readOrder', 'layer', 'style', 'name', 'marginL', 'marginR', 'marginV', 'effect', 'text']
 
 /**
- * @param {import('ebml-iterator').EbmlMasterTag} chunk
+ * @param {import('@rockinchaos/ebml-iterator').EbmlMasterTag} chunk
  * @param {number} tag
  */
 function getChild (chunk, tag) {
   return chunk?.Children?.find(({ id }) => id === tag)
 }
 /**
- * @param {import('ebml-iterator').EbmlMasterTag} chunk
+ * @param {import('@rockinchaos/ebml-iterator').EbmlMasterTag} chunk
  * @param {number} tag
  */
 function getData (chunk, tag) {

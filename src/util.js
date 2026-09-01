@@ -1,6 +1,6 @@
 import EventEmitter from 'events'
 
-import { EbmlIteratorDecoder, Tools, EbmlTagId, EbmlElementType } from 'ebml-iterator'
+import { EbmlIteratorDecoder, Tools, EbmlTagId, EbmlElementType } from '@rockinchaos/ebml-iterator'
 
 function getChild (chunk, tag) {
   return chunk?._children?.find(({ id }) => id === tag)
@@ -12,9 +12,9 @@ export default class Util extends EventEmitter {
 
   destroyed = false
   implementsSlice = false
-  /** @type {Promise<import('ebml-iterator').EbmlMasterTag>} */
+  /** @type {Promise<import('@rockinchaos/ebml-iterator').EbmlMasterTag>} */
   seekHead
-  /** @type {Promise<import('ebml-iterator').EbmlMasterTag | undefined>} */
+  /** @type {Promise<import('@rockinchaos/ebml-iterator').EbmlMasterTag | undefined>} */
   segment
   /** @type {Promise<number | undefined>} */
   duration
@@ -93,7 +93,7 @@ export default class Util extends EventEmitter {
   }
 
   /**
-   * @returns {Promise<import('ebml-iterator').EbmlMasterTag| undefined>}
+   * @returns {Promise<import('@rockinchaos/ebml-iterator').EbmlMasterTag| undefined>}
    */
   async getSegment () {
     if (this.segment) return await this.segment
@@ -115,7 +115,7 @@ export default class Util extends EventEmitter {
 
   /**
    * @param {string} tag
-   * @returns {Promise<null|import('ebml-iterator').EbmlMasterTag>}
+   * @returns {Promise<null|import('@rockinchaos/ebml-iterator').EbmlMasterTag>}
    */
   async readSeekHeadTag (tag) {
     const seekHead = await this.seekHead

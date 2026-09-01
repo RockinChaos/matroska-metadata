@@ -28,9 +28,9 @@
     "url": "https://github.com/RockinChaos/matroska-metadata/issues"
   },
   "dependencies": {
-    "ebml-iterator": "^1.0.5",
-    "fast-readable-async-iterator": "^1.1.1",
-    "pako": "^2.1.0",
-    "uint8-util": "^2.2.4"
+    "@rockinchaos/ebml-iterator": "github:RockinChaos/ebml-iterator#bb3c64d4e14601865b95b218b25b96b204e966b6",
+    "fast-readable-async-iterator": "^2.0.0",
+    "pako": "^3.0.1",
+    "uint8-util": "^2.3.2"
   }
 }

@@ -1,44 +1,47 @@
-lockfileVersion: '6.0'
+lockfileVersion: '9.0'
 
 settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-dependencies:
-  ebml-iterator:
-    specifier: ^1.0.5
-    version: 1.0.5
-  fast-readable-async-iterator:
-    specifier: ^1.1.1
-    version: 1.1.1
-  pako:
-    specifier: ^2.1.0
-    version: 2.1.0
-  uint8-util:
-    specifier: ^2.2.4
-    version: 2.2.4
+importers:
+
+  .:
+    dependencies:
+      '@rockinchaos/ebml-iterator':
+        specifier: github:RockinChaos/ebml-iterator#bb3c64d4e14601865b95b218b25b96b204e966b6
+        version: git+https://github.com/RockinChaos/ebml-iterator.git#bb3c64d4e14601865b95b218b25b96b204e966b6
+      fast-readable-async-iterator:
+        specifier: ^2.0.0
+        version: 2.0.0
+      pako:
+        specifier: ^3.0.1
+        version: 3.0.1
+      uint8-util:
+        specifier: ^2.3.2
+        version: 2.3.2
 
 packages:
 
-  /base64-arraybuffer@1.0.2:
-    resolution: {integrity: sha512-I3yl4r9QB5ZRY3XuJVEPfc2XhZO6YweFPI+UovAzn+8/hb3oJ6lnysaFcjVpkCPfVWFUDvoZ8kmVDP7WyRtYtQ==}
-    engines: {node: '>= 0.6.0'}
-    dev: false
+  '@rockinchaos/ebml-iterator@git+https://github.com/RockinChaos/ebml-iterator.git#bb3c64d4e14601865b95b218b25b96b204e966b6':
+    resolution: {commit: bb3c64d4e14601865b95b218b25b96b204e966b6, repo: https://github.com/RockinChaos/ebml-iterator.git, type: git}
+    version: 1.2.0
 
-  /ebml-iterator@1.0.5:
-    resolution: {integrity: sha512-UsZ8EEk8vAIgYYX9a6Wqwy/cJEd/fKiCVHOXJIpwJBdcQxSHi9llKNxALl5mw2WaqZAhiir0feahWfEY5dj4+Q==}
-    dev: false
+  fast-readable-async-iterator@2.0.0:
+    resolution: {integrity: sha512-8Sld+DuyWRIftl86ZguJxR2oXCBccOiJxrY/Rj9/7ZBynW8pYMWzIcqxFL1da+25jaWJZVa+HHX/8SsA21JdTA==}
 
-  /fast-readable-async-iterator@1.1.1:
-    resolution: {integrity: sha512-xEHkLUEmStETI+15zhglJLO9TjXxNkkp2ldEfYVZdcqxFhM172EfGl1irI6mVlTxXspYKH1/kjevnt/XSsPeFA==}
-    dev: false
+  pako@3.0.1:
+    resolution: {integrity: sha512-GupotUUI0mlhugKjUs4bjOwLt3nrehy9Ys2dxC0GtgVef5cnKggkDMmf2bq2poCCuVXopWPmqsc9VDT2iJUy+w==}
 
-  /pako@2.1.0:
-    resolution: {integrity: sha512-w+eufiZ1WuJYgPXbV/PO3NCMEc3xqylkKHzp8bxp1uW4qaSNQUkwmLLEc3kKsfz8lpV1F8Ht3U1Cm+9Srog2ug==}
-    dev: false
+  uint8-util@2.3.2:
+    resolution: {integrity: sha512-u1c0/eiT1IW+c5+ogbmE2Fu2hmtJQPkuzDmXD/4crMU4FPMjkTkFnjJ2NN/9AsZ9YWcc7yE869uc3WB8wIZEEA==}
 
-  /uint8-util@2.2.4:
-    resolution: {integrity: sha512-uEI5lLozmKQPYEevfEhP9LY3Je5ZmrQhaWXrzTVqrLNQl36xsRh8NiAxYwB9J+2BAt99TRbmCkROQB2ZKhx4UA==}
-    dependencies:
-      base64-arraybuffer: 1.0.2
-    dev: false
+snapshots:
+
+  '@rockinchaos/ebml-iterator@git+https://github.com/RockinChaos/ebml-iterator.git#bb3c64d4e14601865b95b218b25b96b204e966b6': {}
+
+  fast-readable-async-iterator@2.0.0: {}
+
+  pako@3.0.1: {}
+
+  uint8-util@2.3.2: {}
