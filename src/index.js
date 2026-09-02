@@ -1,119 +1,160 @@
-import { inflateSync } from 'zlib'
-
-import { arr2text, concat } from 'uint8-util'
 import { EbmlIteratorDecoder, EbmlTagId } from '@rockinchaos/ebml-iterator'
+import { arr2text, concat } from 'uint8-util'
 import 'fast-readable-async-iterator'
-
+import { inflateSync } from 'zlib'
 import Util from './util.js'
 
+/**
+ * @typedef {{
+ *   number: number,
+ *   language: string,
+ *   type: string,
+ *   _compressed: boolean,
+ *   _headerStrip?: Uint8Array,
+ *   default: boolean,
+ *   forced: boolean,
+ *   name?: string,
+ *   header?: string
+ * }} SubtitleTrack
+ */
+
+/** @typedef {{track: number, value: number, payload: Uint8Array}} SubtitleBlock */
+/** @typedef {{[key: string]: string | number | undefined, text: string, time: number, duration?: number}} Subtitle */
+
+/** @type {Set<string>} */
 const SSA_TYPES = new Set(['ssa', 'ass'])
+/** @type {string[]} */
 const SSA_KEYS = ['readOrder', 'layer', 'style', 'name', 'marginL', 'marginR', 'marginV', 'effect', 'text']
 
 /**
- * @param {import('@rockinchaos/ebml-iterator').EbmlMasterTag} chunk
- * @param {number} tag
+ * @param {SubtitleTrack} track
+ * @param {Uint8Array} payload
+ * @returns {string}
  */
-function getChild (chunk, tag) {
-  return chunk?.Children?.find(({ id }) => id === tag)
+function subtitleText(track, payload) {
+  /** @type {Uint8Array | string} */
+  let data = /** @type {Uint8Array | string} */ (track._compressed ? inflateSync(payload) : payload)
+  if (track._headerStrip) {
+    if (typeof data === 'string') return arr2text(track._headerStrip) + data
+    data = concat([track._headerStrip, /** @type {ArrayLike<number>} */ (data)])
+  }
+  return typeof data === 'string' ? data : arr2text(/** @type {Uint8Array} */ (data))
 }
+
 /**
- * @param {import('@rockinchaos/ebml-iterator').EbmlMasterTag} chunk
- * @param {number} tag
+ * @param {Subtitle} subtitle
+ * @param {SubtitleTrack} track
+ * @returns {void}
  */
-function getData (chunk, tag) {
-  return getChild(chunk, tag)?.data
+function parseSSAFields(subtitle, track) {
+  if (!SSA_TYPES.has(track.type)) return
+
+  // extract SSA/ASS keys
+  const values = subtitle.text.split(',')
+  for (let i = 0; i < SSA_KEYS.length - 1; i++) {
+    subtitle[SSA_KEYS[i]] = values[i]
+  }
+  subtitle.text = values.slice(SSA_KEYS.length - 1).join(',')
 }
 
 export default class Metadata extends Util {
+  /** @type {Map<number, SubtitleTrack>} */
+  subtitleTracks = new Map()
+  /** @type {boolean} */
   implementsSlice = false
-  timecodeScale = 1
+  /** @type {number | null} */
+  timecodeScale = null
+  /** @type {number | null} */
   currentClusterTimecode = null
-
+  /** @type {boolean} */
   destroyed = false
 
-  /**
-   * @type {Map<any, {number: string, language: string, type: string, _compressed?: boolean}>}
-   */
-  subtitleTracks = new Map()
-
-  /**
-   * @param {Blob} file
-   */
-  constructor (file) {
+  /** @param {Blob | {[Symbol.asyncIterator]: (options?: {start?: number}) => AsyncIterator<Uint8Array>}} file */
+  constructor(file) {
     super()
     this.file = file
     this.implementsSlice = !!file.slice
-
     this.segment = this.getSegment()
     this.seekHead = this.getSeekHead()
     this.duration = this.getDuration()
     this.tracks = this.getTracks()
   }
 
-  /**
-   * @returns {Promise<{filename: string, mimetype: string, data: Uint8Array}[]>}
-   */
-  async getAttachments () {
-    return (await this.readSeekHeadTag('Attachments'))?.Children?.map((/** @type {import("ebml-iterator").EbmlMasterTag} */ chunk) => ({
-      filename: getData(chunk, EbmlTagId.FileName),
-      mimetype: getData(chunk, EbmlTagId.FileMimeType),
-      data: getData(chunk, EbmlTagId.FileData)
-    })) || []
+  /** @returns {Promise<{filename: string, mimetype: string, data: Uint8Array}[]>} */
+  async getAttachments() {
+    if (this.destroyed) return []
+    return (await this.readSeekHeadTag('Attachments'))?.Children
+      ?.filter(chunk => chunk.id === EbmlTagId.AttachedFile)
+      .map((/** @type {import('@rockinchaos/ebml-iterator').EbmlMasterTag} */ chunk) => ({
+        filename: this.getData(chunk, EbmlTagId.FileName),
+        mimetype: this.getData(chunk, EbmlTagId.FileMimeType),
+        data: this.getData(chunk, EbmlTagId.FileData)
+      })) || []
   }
 
-  /**
-   * @returns {Promise<{number: string, language: string, type: string, _compressed?: boolean}[]>}
-   */
-  async getTracks () {
+  /** @returns {Promise<SubtitleTrack[]>} */
+  async getTracks() {
+    if (this.destroyed) return []
     if (this.tracks) return await this.tracks
-    const Tracks = await this.readSeekHeadTag('Tracks')
 
-    if (!Tracks?.Children?.length) return []
+    const Tracks = (await this.readSeekHeadTag('Tracks')) || await this.readUntilTag(this.getFileStream(this.segmentStart), EbmlTagId.Tracks)
+    if (this.destroyed || !Tracks?.Children?.length) return []
 
     for (const entry of Tracks.Children.filter(c => c.id === EbmlTagId.TrackEntry)) {
       // Skip non subtitle tracks
-      if (getData(entry, EbmlTagId.TrackType) !== 0x11) continue
+      if (this.getData(entry, EbmlTagId.TrackType) !== 0x11) continue
 
-      const codecID = getData(entry, EbmlTagId.CodecID) || ''
-      if (codecID.startsWith('S_TEXT')) {
+      const codecID = this.getData(entry, EbmlTagId.CodecID) || ''
+      let type
+      if (codecID === 'S_ASS') {
+        type = 'ass'
+      } else if (codecID === 'S_SSA') {
+        type = 'ssa'
+      } else if (codecID.startsWith('S_TEXT/')) {
+        type = codecID.substring(7).toLowerCase()
+      }
+
+      if (type) {
+        const header = this.getData(entry, EbmlTagId.CodecPrivate)
+        const encoding = entry.Children?.find(c => c.id === EbmlTagId.ContentEncodings)?.Children?.find(c => c.id === EbmlTagId.ContentEncoding)
+        const compression = this.getChild(encoding, EbmlTagId.ContentCompression)
+        const compressionAlgorithm = this.getData(compression, EbmlTagId.ContentCompAlgo) ?? 0
+        const compressionScope = this.getData(encoding, EbmlTagId.ContentEncodingScope) ?? 1
+        const compressionAppliesToBlocks = Boolean(compressionScope & 1)
         const track = {
-          number: getData(entry, EbmlTagId.TrackNumber),
-          language: getData(entry, EbmlTagId.Language),
-          type: codecID.substring(7).toLowerCase()
+          number: this.getData(entry, EbmlTagId.TrackNumber),
+          language: this.getData(entry, EbmlTagId.Language) ?? 'eng',
+          type,
+          default: Boolean(this.getData(entry, EbmlTagId.FlagDefault) ?? 1),
+          forced: Boolean(this.getData(entry, EbmlTagId.FlagForced) ?? 0),
+          name: this.getData(entry, EbmlTagId.Name),
+          header: header ? arr2text(header) : undefined,
+          // Matroska defaults ContentCompAlgo to zlib (0). Algorithm 3 is
+          // header stripping, which prepends ContentCompSettings instead.
+          _compressed: Boolean(compressionAppliesToBlocks && compression && compressionAlgorithm === 0),
+          _headerStrip: compressionAppliesToBlocks && compressionAlgorithm === 3 ? this.getData(compression, EbmlTagId.ContentCompSettings) : undefined
         }
-
-        const name = getData(entry, EbmlTagId.Name)
-        if (name) track.name = name
-
-        const header = getData(entry, EbmlTagId.CodecPrivate)
-        if (header) track.header = arr2text(header)
-
-        // TODO: Assume zlib deflate compression
-        const compressed = entry.Children.find(c =>
-          c.id === EbmlTagId.ContentEncodings &&
-          c.Children.find(cc =>
-            cc.id === EbmlTagId.ContentEncoding &&
-            getChild(cc, EbmlTagId.ContentCompression)
-          )
-        )
-
-        if (compressed) track._compressed = true
 
         this.subtitleTracks.set(track.number, track)
       }
     }
 
-    const tracks = [...this.subtitleTracks.values()]
-
-    return tracks
+    return [...this.subtitleTracks.values()]
   }
 
-  async getChapters () {
+  /** @returns {Promise<{start: number, end: number, text: string | undefined, language: string | undefined}[]>} */
+  async getChapters() {
+    if (this.destroyed) return []
     const Chapters = await this.readSeekHeadTag('Chapters')
+    if (this.destroyed) return []
 
-    const timecodeScale = this.timecodeScale || ((await this.readUntilTag(this.getFileStream(), EbmlTagId.TimecodeScale))?.data / 1000000)
+    let timecodeScale = this.timecodeScale
+    if (!timecodeScale) {
+      timecodeScale = ((await this.readUntilTag(this.getFileStream(), EbmlTagId.TimecodeScale))?.data / 1000000) || 1
+      this.timecodeScale = timecodeScale
+    }
 
-    if (!Chapters?.Children?.length) return []
+    if (this.destroyed || !Chapters?.Children?.length) return []
 
     const editions = Chapters.Children.filter(c => c.id === EbmlTagId.EditionEntry)
 
@@ -126,94 +167,82 @@ export default class Metadata extends Util {
     }) || editions[0]
 
     // exclude hidden atoms
-    const atoms = defaultEdition.Children.filter(c => c.id === EbmlTagId.ChapterAtom && !getData(c, EbmlTagId.ChapterFlagHidden))
+    if (!defaultEdition?.Children?.length) return []
+
+    const atoms = defaultEdition.Children.filter(c => c.id === EbmlTagId.ChapterAtom && !this.getData(c, EbmlTagId.ChapterFlagHidden))
 
     const chapters = []
     for (let i = atoms.length - 1; i >= 0; --i) {
-      const start = getData(atoms[i], EbmlTagId.ChapterTimeStart) / timecodeScale / 1000000
-      const end = (getData(atoms[i], EbmlTagId.ChapterTimeEnd) / timecodeScale / 1000000) || chapters[i + 1]?.start || await this.duration || 0
-      const disp = getChild(atoms[i], EbmlTagId.ChapterDisplay)
-
+      const start = this.getData(atoms[i], EbmlTagId.ChapterTimeStart) / 1000000
+      const end = (this.getData(atoms[i], EbmlTagId.ChapterTimeEnd) / 1000000) || chapters[i + 1]?.start || ((await this.duration || 0) * timecodeScale)
+      const display = this.getChild(atoms[i], EbmlTagId.ChapterDisplay)
       chapters[i] = {
         start,
         end,
-        text: getData(disp, EbmlTagId.ChapString),
-        language: getData(disp, EbmlTagId.ChapLanguage)
+        text: this.getData(display, EbmlTagId.ChapString),
+        language: this.getData(display, EbmlTagId.ChapLanguage)
       }
     }
 
     return chapters
   }
 
-  /**
-   * @returns {Promise<number | undefined>}
-   */
-  async getDuration () {
+  /** @returns {Promise<number | undefined>} */
+  async getDuration() {
     if (this.duration) return this.duration
-    const Info = await this.readSeekHeadTag('Info')
+    const Info = (await this.readSeekHeadTag('Info')) || await this.readUntilTag(this.getFileStream(this.segmentStart), EbmlTagId.Info)
 
-    if (!Info?.Children?.length) return undefined
-    const Duration = getChild(Info, EbmlTagId.Duration)
+    if (this.destroyed || !Info?.Children?.length) return undefined
+    const timecodeScale = this.getData(Info, EbmlTagId.TimecodeScale)
+    if (timecodeScale) this.timecodeScale = timecodeScale / 1000000
+    const Duration = this.getChild(Info, EbmlTagId.Duration)
     return Duration?.data
   }
 
   /**
-   * @param {import("ebml-iterator").EbmlMasterTag} chunk
+   * @param {import('@rockinchaos/ebml-iterator').EbmlMasterTag} chunk
+   * @param {number} timecodeScale
+   * @param {number | null} currentClusterTimecode
    */
-  async handleBlockGroup (chunk, timecodeScale, currentClusterTimecode) {
+  async handleBlockGroup(chunk, timecodeScale, currentClusterTimecode) {
+    if (this.destroyed) return
     await this.tracks
+    if (this.destroyed) return
 
-    const block = getChild(chunk, EbmlTagId.Block)
-
+    const block = /** @type {SubtitleBlock | undefined} */ (this.getChild(chunk, EbmlTagId.Block))
     if (block && this.subtitleTracks.has(block.track)) {
-      const blockDuration = getData(chunk, EbmlTagId.BlockDuration)
+      const blockDuration = this.getData(chunk, EbmlTagId.BlockDuration)
       const track = this.subtitleTracks.get(block.track)
 
       if (!track) return
 
-      const payload = track._compressed
-        ? inflateSync(block.payload)
-        : block.payload
-
+      /** @type {Subtitle} */
       const subtitle = {
-        text: arr2text(payload),
-        time: (block.value + currentClusterTimecode) * timecodeScale,
-        duration: blockDuration * timecodeScale
+        text: subtitleText(track, block.payload),
+        time: (block.value + (currentClusterTimecode || 0)) * timecodeScale,
+        duration: blockDuration == null ? undefined : blockDuration * timecodeScale
       }
 
-      if (SSA_TYPES.has(track.type)) {
-        // extract SSA/ASS keys
-        const values = subtitle.text.split(',')
-
-        // ignore read-order, and skip layer if ssa
-        for (let i = track.type === 'ssa' ? 2 : 1; i < 8; i++) {
-          subtitle[SSA_KEYS[i]] = values[i]
-        }
-
-        subtitle.text = values.slice(8).join(',')
-      }
-
+      parseSSAFields(subtitle, track)
       this.emit('subtitle', subtitle, block.track)
     }
   }
 
-  destroy () {
-    this.destroyed = true
-  }
-
   /**
    * @param {AsyncIterable<Uint8Array>} stream
+   * @param {boolean} [stable=false]
    */
-  async * parseStream (stream, stable = false) {
+  async * parseStream(stream, stable = false) {
     const decoder = new EbmlIteratorDecoder({
       bufferTagIds: [
         EbmlTagId.TimecodeScale,
         EbmlTagId.BlockGroup,
+        EbmlTagId.SimpleBlock,
         EbmlTagId.Timecode
       ]
     })
 
-    let timecodeScale = this.timecodeScale
+    let timecodeScale = this.timecodeScale || 1
     let currentClusterTimecode = this.currentClusterTimecode
 
     const tagMap = {
@@ -225,37 +254,47 @@ export default class Metadata extends Util {
       [EbmlTagId.Timecode]: tag => {
         this.currentClusterTimecode = currentClusterTimecode = tag.data
       },
-      [EbmlTagId.BlockGroup]: data => this.handleBlockGroup(data, timecodeScale, currentClusterTimecode)
+      [EbmlTagId.BlockGroup]: data => this.handleBlockGroup(data, timecodeScale, currentClusterTimecode),
+      [EbmlTagId.SimpleBlock]: block => this.handleBlock(block, timecodeScale, currentClusterTimecode)
     }
 
-    let buffer = new Uint8Array()
+    const handleTag = tag => {
+      const handler = tagMap[tag.id]
+      if (!handler) return
+      void Promise.resolve(handler(tag)).catch(error => {
+        if (!this.destroyed) this.emit('warning', error, tag)
+      })
+    }
 
+    let buffer = new Uint8Array(0)
     for await (const chunk of stream) {
       if (!stable) {
-        for (let i = 0; i < chunk.length - 12; i++) {
+        const candidate = concat([buffer, chunk])
+        for (let i = 0; i + 5 < candidate.length; i++) {
           // EbmlTagId.Cluster: 524531317 aka 0x1F43B675
           // https://matroska.org/technical/elements.html#LevelCluster
-          if (chunk[i] === 0x1f && chunk[i + 1] === 0x43 && chunk[i + 2] === 0xb6 && chunk[i + 3] === 0x75) {
+          if (candidate[i] === 0x1f && candidate[i + 1] === 0x43 && candidate[i + 2] === 0xb6 && candidate[i + 3] === 0x75) {
             // length of cluster size tag
-            const len = 8 - Math.floor(Math.log2(chunk[i + 4]))
+            const len = 8 - Math.floor(Math.log2(candidate[i + 4]))
             // first tag in cluster is a valid EbmlTag
-            if (EbmlTagId[chunk[i + 4 + len]]) {
+            if (i + 4 + len < candidate.length && EbmlTagId[candidate[i + 4 + len]]) {
               // okay this is probably a cluster
               stable = true
               buffer = null
-              for (const tag of decoder.parseTags(chunk.slice(i))) {
-                tagMap[tag.id]?.(tag)
+              for (const tag of decoder.parseTags(candidate.slice(i))) {
+                handleTag(tag)
               }
               break
             }
           }
         }
         if (!stable) {
-          buffer = concat([buffer, chunk])
+          // Keep only enough data to recognize a Cluster header split across chunks.
+          buffer = candidate.slice(-12)
         }
       } else {
         for (const tag of decoder.parseTags(chunk)) {
-          tagMap[tag.id]?.(tag)
+          handleTag(tag)
         }
       }
       yield chunk
@@ -263,11 +302,41 @@ export default class Metadata extends Util {
     }
   }
 
-  async parseFile () {
-    this.stable = true
-    // eslint-disable-next-line no-unused-vars
+  /**
+   * @param {SubtitleBlock} block
+   * @param {number} timecodeScale
+   * @param {number | null} currentClusterTimecode
+   */
+  async handleBlock(block, timecodeScale, currentClusterTimecode) {
+    if (this.destroyed) return
+    await this.tracks
+    if (this.destroyed || !this.subtitleTracks.has(block.track)) return
+
+    const track = this.subtitleTracks.get(block.track)
+    if (!track) return
+
+    /** @type {Subtitle} */
+    const subtitle = {
+      text: subtitleText(track, block.payload),
+      time: (block.value + (currentClusterTimecode || 0)) * timecodeScale,
+      duration: undefined
+    }
+
+    parseSSAFields(subtitle, track)
+    this.emit('subtitle', subtitle, block.track)
+  }
+
+  // noinspection JSUnusedGlobalSymbols
+  /** @returns {Promise<void | null>} */
+  async parseFile() {
     for await (const _ of this.parseStream(this.getFileStream(), true)) {
       if (this.destroyed) return null
     }
+  }
+
+  // noinspection JSUnusedGlobalSymbols
+  /** @returns {void} */
+  destroy() {
+    this.destroyed = true
   }
 }

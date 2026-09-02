@@ -1,3 +1,8 @@
 import { inflate } from 'pako'
 
-export const inflateSync = buffer => inflate(buffer, { to: 'string' })
+// noinspection JSUnusedGlobalSymbols
+/**
+ * @param {Uint8Array} buffer
+ * @returns {string}
+ */
+export const inflateSync = buffer => inflate(buffer, { toText: true })

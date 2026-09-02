@@ -6,6 +6,9 @@
   "description": "A lightweight Matroska/WebM metadata reader for Node.js and browsers, with EBML SeekHead-based metadata lookup.",
   "type": "module",
   "main": "src/index.js",
+  "scripts": {
+    "test": "node --test"
+  },
   "browser": {
     "zlib": "./src/inflateWeb.js"
   },
