@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@rockinchaos/ebml-iterator':
-        specifier: github:RockinChaos/ebml-iterator#bb3c64d4e14601865b95b218b25b96b204e966b6
-        version: git+https://github.com/RockinChaos/ebml-iterator.git#bb3c64d4e14601865b95b218b25b96b204e966b6
+        specifier: github:RockinChaos/ebml-iterator#157dec919d7b02485ede2c6418063b40556dbc67
+        version: https://codeload.github.com/RockinChaos/ebml-iterator/tar.gz/157dec919d7b02485ede2c6418063b40556dbc67
       fast-readable-async-iterator:
         specifier: ^2.0.0
         version: 2.0.0
@@ -23,9 +23,9 @@ importers:
 
 packages:
 
-  '@rockinchaos/ebml-iterator@git+https://github.com/RockinChaos/ebml-iterator.git#bb3c64d4e14601865b95b218b25b96b204e966b6':
-    resolution: {commit: bb3c64d4e14601865b95b218b25b96b204e966b6, repo: https://github.com/RockinChaos/ebml-iterator.git, type: git}
-    version: 1.2.0
+  '@rockinchaos/ebml-iterator@https://codeload.github.com/RockinChaos/ebml-iterator/tar.gz/157dec919d7b02485ede2c6418063b40556dbc67':
+    resolution: {gitHosted: true, integrity: sha512-XhOVrbiPRX8kgbyHffe+SVC/iGIAeR8KkJuO9JsORIb4KIWco1G6jjjCrWZ1DTPj59D2Qnv7NT+uEu3sh7sj0g==, tarball: https://codeload.github.com/RockinChaos/ebml-iterator/tar.gz/157dec919d7b02485ede2c6418063b40556dbc67}
+    version: 1.2.1
 
   fast-readable-async-iterator@2.0.0:
     resolution: {integrity: sha512-8Sld+DuyWRIftl86ZguJxR2oXCBccOiJxrY/Rj9/7ZBynW8pYMWzIcqxFL1da+25jaWJZVa+HHX/8SsA21JdTA==}
@@ -38,7 +38,7 @@ packages:
 
 snapshots:
 
-  '@rockinchaos/ebml-iterator@git+https://github.com/RockinChaos/ebml-iterator.git#bb3c64d4e14601865b95b218b25b96b204e966b6': {}
+  '@rockinchaos/ebml-iterator@https://codeload.github.com/RockinChaos/ebml-iterator/tar.gz/157dec919d7b02485ede2c6418063b40556dbc67': {}
 
   fast-readable-async-iterator@2.0.0: {}
 

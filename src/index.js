@@ -1,4 +1,5 @@
-import { EbmlIteratorDecoder, EbmlTagId } from '@rockinchaos/ebml-iterator'
+import { EbmlIteratorDecoder, EbmlTagId, EbmlTagPosition } from '@rockinchaos/ebml-iterator'
+import { CLUSTER_SEARCH_BYTES, findCluster } from './cluster.js'
 import { arr2text, concat } from 'uint8-util'
 import 'fast-readable-async-iterator'
 import { inflateSync } from 'zlib'
@@ -11,6 +12,7 @@ import Util from './util.js'
  *   type: string,
  *   _compressed: boolean,
  *   _headerStrip?: Uint8Array,
+ *   _defaultDuration?: number,
  *   default: boolean,
  *   forced: boolean,
  *   name?: string,
@@ -21,6 +23,8 @@ import Util from './util.js'
 /** @typedef {{track: number, value: number, payload: Uint8Array}} SubtitleBlock */
 /** @typedef {{[key: string]: string | number | undefined, text: string, time: number, duration?: number}} Subtitle */
 
+/** @type {number} */
+const MAX_BUFFERED_BYTES = 64 * 1_024 * 1_024
 /** @type {Set<string>} */
 const SSA_TYPES = new Set(['ssa', 'ass'])
 /** @type {string[]} */
@@ -69,9 +73,16 @@ export default class Metadata extends Util {
   /** @type {boolean} */
   destroyed = false
 
-  /** @param {Blob | {[Symbol.asyncIterator]: (options?: {start?: number}) => AsyncIterator<Uint8Array>}} file */
-  constructor(file) {
+  /**
+   * @param {Blob | {[Symbol.asyncIterator]: (options?: {start?: number}) => AsyncIterator<Uint8Array>}} file
+   * @param {{maxBufferedBytes?: number}} [options]
+   */
+  constructor(file, options = {}) {
     super()
+    this.maxBufferedBytes = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES
+    if (!Number.isSafeInteger(this.maxBufferedBytes) || this.maxBufferedBytes < 1) {
+      throw new RangeError('maxBufferedBytes must be a positive safe integer')
+    }
     this.file = file
     this.implementsSlice = !!file.slice
     this.segment = this.getSegment()
@@ -116,6 +127,7 @@ export default class Metadata extends Util {
 
       if (type) {
         const header = this.getData(entry, EbmlTagId.CodecPrivate)
+        const defaultDuration = this.getData(entry, EbmlTagId.DefaultDuration)
         const encoding = entry.Children?.find(c => c.id === EbmlTagId.ContentEncodings)?.Children?.find(c => c.id === EbmlTagId.ContentEncoding)
         const compression = this.getChild(encoding, EbmlTagId.ContentCompression)
         const compressionAlgorithm = this.getData(compression, EbmlTagId.ContentCompAlgo) ?? 0
@@ -129,6 +141,7 @@ export default class Metadata extends Util {
           forced: Boolean(this.getData(entry, EbmlTagId.FlagForced) ?? 0),
           name: this.getData(entry, EbmlTagId.Name),
           header: header ? arr2text(header) : undefined,
+          _defaultDuration: Number.isFinite(defaultDuration) && defaultDuration > 0 ? defaultDuration / 1_000_000 : undefined,
           // Matroska defaults ContentCompAlgo to zlib (0). Algorithm 3 is
           // header stripping, which prepends ContentCompSettings instead.
           _compressed: Boolean(compressionAppliesToBlocks && compression && compressionAlgorithm === 0),
@@ -150,7 +163,7 @@ export default class Metadata extends Util {
 
     let timecodeScale = this.timecodeScale
     if (!timecodeScale) {
-      timecodeScale = ((await this.readUntilTag(this.getFileStream(), EbmlTagId.TimecodeScale))?.data / 1000000) || 1
+      timecodeScale = ((await this.readUntilTag(this.getFileStream(), EbmlTagId.TimecodeScale))?.data / 1_000_000) || 1
       this.timecodeScale = timecodeScale
     }
 
@@ -173,8 +186,8 @@ export default class Metadata extends Util {
 
     const chapters = []
     for (let i = atoms.length - 1; i >= 0; --i) {
-      const start = this.getData(atoms[i], EbmlTagId.ChapterTimeStart) / 1000000
-      const end = (this.getData(atoms[i], EbmlTagId.ChapterTimeEnd) / 1000000) || chapters[i + 1]?.start || ((await this.duration || 0) * timecodeScale)
+      const start = this.getData(atoms[i], EbmlTagId.ChapterTimeStart) / 1_000_000
+      const end = (this.getData(atoms[i], EbmlTagId.ChapterTimeEnd) / 1_000_000) || chapters[i + 1]?.start || ((await this.duration || 0) * timecodeScale)
       const display = this.getChild(atoms[i], EbmlTagId.ChapterDisplay)
       chapters[i] = {
         start,
@@ -194,7 +207,7 @@ export default class Metadata extends Util {
 
     if (this.destroyed || !Info?.Children?.length) return undefined
     const timecodeScale = this.getData(Info, EbmlTagId.TimecodeScale)
-    if (timecodeScale) this.timecodeScale = timecodeScale / 1000000
+    if (timecodeScale) this.timecodeScale = timecodeScale / 1_000_000
     const Duration = this.getChild(Info, EbmlTagId.Duration)
     return Duration?.data
   }
@@ -215,12 +228,14 @@ export default class Metadata extends Util {
       const track = this.subtitleTracks.get(block.track)
 
       if (!track) return
+      const duration = this.subtitleDuration(track, blockDuration, timecodeScale)
+      if (duration == null) return
 
       /** @type {Subtitle} */
       const subtitle = {
         text: subtitleText(track, block.payload),
         time: (block.value + (currentClusterTimecode || 0)) * timecodeScale,
-        duration: blockDuration == null ? undefined : blockDuration * timecodeScale
+        duration
       }
 
       parseSSAFields(subtitle, track)
@@ -233,7 +248,7 @@ export default class Metadata extends Util {
    * @param {boolean} [stable=false]
    */
   async * parseStream(stream, stable = false) {
-    const decoder = new EbmlIteratorDecoder({
+    const createDecoder = () => new EbmlIteratorDecoder({
       bufferTagIds: [
         EbmlTagId.TimecodeScale,
         EbmlTagId.BlockGroup,
@@ -241,14 +256,19 @@ export default class Metadata extends Util {
         EbmlTagId.Timecode
       ]
     })
+    let decoder = createDecoder()
 
     let timecodeScale = this.timecodeScale || 1
-    let currentClusterTimecode = this.currentClusterTimecode
+    // Each playback range owns its timestamp; other iterators may run concurrently
+    let currentClusterTimecode = null
 
     const tagMap = {
+      [EbmlTagId.Cluster]: tag => {
+        if (tag.position === EbmlTagPosition.Start) currentClusterTimecode = null
+      },
       // Segment Information
       [EbmlTagId.TimecodeScale]: tag => {
-        this.timecodeScale = timecodeScale = tag.data / 1000000
+        this.timecodeScale = timecodeScale = tag.data / 1_000_000
       },
       // Assumption: This is a Cluster `Timecode`
       [EbmlTagId.Timecode]: tag => {
@@ -268,33 +288,37 @@ export default class Metadata extends Util {
 
     let buffer = new Uint8Array(0)
     for await (const chunk of stream) {
-      if (!stable) {
-        const candidate = concat([buffer, chunk])
-        for (let i = 0; i + 5 < candidate.length; i++) {
-          // EbmlTagId.Cluster: 524531317 aka 0x1F43B675
-          // https://matroska.org/technical/elements.html#LevelCluster
-          if (candidate[i] === 0x1f && candidate[i + 1] === 0x43 && candidate[i + 2] === 0xb6 && candidate[i + 3] === 0x75) {
-            // length of cluster size tag
-            const len = 8 - Math.floor(Math.log2(candidate[i + 4]))
-            // first tag in cluster is a valid EbmlTag
-            if (i + 4 + len < candidate.length && EbmlTagId[candidate[i + 4 + len]]) {
-              // okay this is probably a cluster
-              stable = true
-              buffer = null
-              for (const tag of decoder.parseTags(candidate.slice(i))) {
-                handleTag(tag)
-              }
-              break
-            }
-          }
-        }
+      let input = stable ? chunk : concat([buffer, chunk])
+      let searchStart = 0
+      while (true) {
         if (!stable) {
-          // Keep only enough data to recognize a Cluster header split across chunks.
-          buffer = candidate.slice(-12)
+          const start = findCluster(input, searchStart)
+          if (start < 0) {
+            // Uint8Array.from also copies Buffer views before forwarding the chunk
+            buffer = Uint8Array.from(input.subarray(-CLUSTER_SEARCH_BYTES))
+            break
+          }
+          decoder = createDecoder()
+          currentClusterTimecode = null
+          input = input.subarray(start)
+          buffer = new Uint8Array(0)
+          stable = true
         }
-      } else {
-        for (const tag of decoder.parseTags(chunk)) {
-          handleTag(tag)
+        try {
+          for (const tag of decoder.parseTags(input)) handleTag(tag)
+          const pending = decoder.readTagHeader(decoder.buffer)
+          if (pending && pending.size > (this.maxBufferedBytes ?? MAX_BUFFERED_BYTES)) {
+            throw new Error(`EBML element ${pending.id.toString(16)} exceeds maxBufferedBytes (${pending.size} bytes)`)
+          }
+          break
+        } catch (error) {
+          if (!this.destroyed) this.emit('warning', error)
+          // The decoder retains the failing element and any following bytes
+          // Retry later Clusters in those bytes, including in the same chunk
+          input = Uint8Array.from(decoder.buffer)
+          stable = false
+          currentClusterTimecode = null
+          searchStart = 1
         }
       }
       yield chunk
@@ -314,16 +338,34 @@ export default class Metadata extends Util {
 
     const track = this.subtitleTracks.get(block.track)
     if (!track) return
+    const duration = this.subtitleDuration(track, undefined, timecodeScale)
+    if (duration == null) return
 
     /** @type {Subtitle} */
     const subtitle = {
       text: subtitleText(track, block.payload),
       time: (block.value + (currentClusterTimecode || 0)) * timecodeScale,
-      duration: undefined
+      duration
     }
 
     parseSSAFields(subtitle, track)
     this.emit('subtitle', subtitle, block.track)
+  }
+
+  /**
+   * @param {SubtitleTrack} track
+   * @param {number | undefined} blockDuration
+   * @param {number} timecodeScale
+   * @returns {number | undefined}
+   */
+  subtitleDuration(track, blockDuration, timecodeScale) {
+    const duration = blockDuration == null ? track._defaultDuration : blockDuration * timecodeScale
+    if (Number.isFinite(duration) && duration >= 0) return duration
+    this.durationWarnings ??= new Set()
+    if (!this.durationWarnings.has(track.number)) {
+      this.durationWarnings.add(track.number)
+      this.emit('warning', new Error(`Skipping subtitle without a finite duration on track ${track.number}`))
+    }
   }
 
   // noinspection JSUnusedGlobalSymbols

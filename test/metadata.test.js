@@ -42,6 +42,7 @@ function createSubtitleTrack(overrides = {}) {
     default: true,
     forced: false,
     _compressed: false,
+    _defaultDuration: 1_000,
     ...overrides
   }
 }
@@ -134,13 +135,13 @@ test('returns chapter timestamps in milliseconds and scales the final duration f
   }
   const metadata = Object.assign(Object.create(Metadata.prototype), {
     timecodeScale: 2,
-    duration: Promise.resolve(6000),
+    duration: Promise.resolve(6_000),
     readSeekHeadTag: readSeekHeadTag(chapters)
   })
 
   assert.deepEqual(await metadata.getChapters(), [
-    { start: 5000, end: 8000, text: undefined, language: undefined },
-    { start: 8000, end: 12000, text: undefined, language: undefined }
+    { start: 5_000, end: 8_000, text: undefined, language: undefined },
+    { start: 8_000, end: 12_000, text: undefined, language: undefined }
   ])
 })
 
@@ -176,7 +177,7 @@ test('streams subtitle events through a WebTorrent-style iterator callback', asy
   const forwarded = []
   for await (const chunk of parsedIterator) forwarded.push(chunk)
 
-  assert.deepEqual(emitted, [['subtitle', { text: 'hello', time: 105, duration: undefined }, 1]])
+  assert.deepEqual(emitted, [['subtitle', { text: 'hello', time: 105, duration: 1_000 }, 1]])
   assert.deepEqual(forwarded, chunks)
 })
 
@@ -336,6 +337,7 @@ test('finds subtitle tracks in files without a SeekHead', async () => {
     forced: false,
     name: undefined,
     header: undefined,
+    _defaultDuration: undefined,
     _compressed: false,
     _headerStrip: undefined
   }])
