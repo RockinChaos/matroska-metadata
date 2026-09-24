@@ -7,6 +7,12 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
+    "lint": "eslint src test eslint.config.js",
+    "lint:fix": "eslint src test eslint.config.js --fix",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier src test .github package.json tsconfig.json eslint.config.js .prettierrc.json \"*.md\" --write --no-error-on-unmatched-pattern",
+    "format:check": "prettier src test .github package.json tsconfig.json eslint.config.js .prettierrc.json \"*.md\" --check --no-error-on-unmatched-pattern",
+    "check": "run-s lint typecheck format:check test",
     "test": "node --test"
   },
   "browser": {
@@ -33,7 +39,16 @@
   "dependencies": {
     "@rockinchaos/ebml-iterator": "github:RockinChaos/ebml-iterator#157dec919d7b02485ede2c6418063b40556dbc67",
     "fast-readable-async-iterator": "^2.0.0",
-    "pako": "^3.0.1",
+    "pako": "^3.0.2",
     "uint8-util": "^2.3.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "24.13.6",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
+    "npm-run-all2": "^9.0.3",
+    "prettier": "^3.9.9",
+    "typescript": "6.0.3"
   }
 }

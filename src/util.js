@@ -10,7 +10,7 @@ import EventEmitter from 'events'
  * }} EbmlTag
  */
 
-/** @typedef {Blob | {[Symbol.asyncIterator]: (options?: {start?: number}) => AsyncIterator<Uint8Array>}} MetadataFile */
+/** @typedef {Blob | {[Symbol.asyncIterator]: (options?: {start?: number}) => AsyncIterableIterator<Uint8Array>}} MetadataFile */
 /** @typedef {EbmlTag & {absoluteStart: number, tagHeaderLength: number}} DecodedTag */
 /** @typedef {Record<string, EbmlTag>} SeekHead */
 
@@ -119,15 +119,20 @@ export default class Util extends EventEmitter {
     }
   }
 
-  /** @param {number | undefined} [start] */
+  /**
+   * @param {number | undefined} [start]
+   * @returns {AsyncIterableIterator<Uint8Array>}
+   */
   getFileStream(start) {
     // some file-likes might not implement slice: webtorrent
     // if they do not implement async iterator, error
     if (this.implementsSlice) {
       const file = /** @type {Blob} */ (this.file)
-      return /** @type {AsyncIterable<Uint8Array>} */ (file.slice(start).stream())[Symbol.asyncIterator]()
+      return /** @type {AsyncIterableIterator<Uint8Array>} */ (file.slice(start).stream()[Symbol.asyncIterator]())
     } else {
-      const file = /** @type {{[Symbol.asyncIterator]: (options?: {start?: number}) => AsyncIterator<Uint8Array>}} */ (this.file)
+      const file = /** @type {{[Symbol.asyncIterator]: (options?: {start?: number}) => AsyncIterableIterator<Uint8Array>}} */ (
+        this.file
+      )
       return file[Symbol.asyncIterator]({ start })
     }
   }

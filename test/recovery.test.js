@@ -16,12 +16,17 @@ function metadata(track = {}) {
     currentClusterTimecode: 999_999,
     events: []
   })
-  parser.emit = (...args) => { parser.events.push(args); return true }
+  parser.emit = (...args) => {
+    parser.events.push(args)
+    return true
+  }
   return parser
 }
 
 async function consume(parser, chunks, stable = false) {
-  async function * source() { yield * chunks }
+  async function* source() {
+    yield* chunks
+  }
   const output = []
   for await (const chunk of parser.parseStream(source(), stable)) output.push(chunk)
   await Promise.resolve()
@@ -30,7 +35,9 @@ async function consume(parser, chunks, stable = false) {
   return parser.events.filter(e => e[0] === 'subtitle').map(e => e[1])
 }
 
-function warnings(parser) { return parser.events.filter(e => e[0] === 'warning') }
+function warnings(parser) {
+  return parser.events.filter(e => e[0] === 'warning')
+}
 
 test('ignores a false Cluster at a chunk boundary without swallowing later subtitles', async () => {
   const parser = metadata()
@@ -41,11 +48,21 @@ test('ignores a false Cluster at a chunk boundary without swallowing later subti
 })
 
 test('finds finite and unknown-size Clusters with split timestamps and CRC/other prefixes', async () => {
-  const prefixes = [Buffer.alloc(0), Buffer.from('bf8400000000', 'hex'), Buffer.from('ec82aabb', 'hex'), Buffer.from('a78100ab8100', 'hex')]
+  const prefixes = [
+    Buffer.alloc(0),
+    Buffer.from('bf8400000000', 'hex'),
+    Buffer.from('ec82aabb', 'hex'),
+    Buffer.from('a78100ab8100', 'hex')
+  ]
   for (const prefix of prefixes) {
     const wideSize = Buffer.from('0100000000000000', 'hex')
     wideSize[7] = 20 + prefix.length
-    for (const size of [Buffer.from([0x94 + prefix.length]), Buffer.from([0xff]), wideSize, Buffer.from('01ffffffffffffff', 'hex')]) {
+    for (const size of [
+      Buffer.from([0x94 + prefix.length]),
+      Buffer.from([0xff]),
+      wideSize,
+      Buffer.from('01ffffffffffffff', 'hex')
+    ]) {
       const cluster = Buffer.concat([good.subarray(0, 4), size, prefix, good.subarray(5)])
       for (let split = 1; split < cluster.length; split++) {
         const parser = metadata()
@@ -54,20 +71,38 @@ test('finds finite and unknown-size Clusters with split timestamps and CRC/other
         assert.equal(events[0].time, 105)
         assert.equal(warnings(parser).length, 0)
       }
-      assert.equal((await consume(metadata(), Array.from(cluster, byte => Uint8Array.of(byte)))).length, 1)
+      assert.equal(
+        (
+          await consume(
+            metadata(),
+            Array.from(cluster, byte => Uint8Array.of(byte))
+          )
+        ).length,
+        1
+      )
     }
   }
 })
 
 test('rejects invalid sync candidates and keeps searching within the same chunk', async () => {
-  for (const hex of ['1f43b67500', '1f43b6750120010000000000', '1f43b67581e78100', '1f43b675ffe7ff', '1f43b675ffbf83000000e78100']) {
+  for (const hex of [
+    '1f43b67500',
+    '1f43b6750120010000000000',
+    '1f43b67581e78100',
+    '1f43b675ffe7ff',
+    '1f43b675ffbf83000000e78100'
+  ]) {
     const parser = metadata()
     assert.equal((await consume(parser, [Buffer.concat([Buffer.from(hex, 'hex'), good])])).length, 1)
   }
 })
 
 test('warns on malformed blocks and recovers in the same chunk or a later chunk', async () => {
-  for (const chunks of [[Buffer.concat([malformed, good])], [malformed, good], [malformed, good.subarray(0, 2), good.subarray(2)]]) {
+  for (const chunks of [
+    [Buffer.concat([malformed, good])],
+    [malformed, good],
+    [malformed, good.subarray(0, 2), good.subarray(2)]
+  ]) {
     const parser = metadata()
     const events = await consume(parser, chunks)
     assert.equal(events.length, 1)
@@ -125,8 +160,18 @@ test('does not scan inside a valid block payload', async () => {
 test('source errors still propagate instead of being misreported as decoder warnings', async () => {
   const parser = metadata()
   const error = new Error('torrent read failed')
-  async function * source() { yield good; throw error }
-  await assert.rejects(async () => { for await (const _ of parser.parseStream(source())) {} }, e => e === error)
+  async function* source() {
+    yield good
+    throw error
+  }
+  await assert.rejects(
+    async () => {
+      for await (const _ of parser.parseStream(source())) {
+        // Exhaust the source to surface its error
+      }
+    },
+    e => e === error
+  )
   assert.equal(warnings(parser).length, 0)
 })
 
@@ -134,13 +179,19 @@ test('does not share timestamps between concurrent playback ranges', async () =>
   const parser = metadata()
   const later = Buffer.from(good)
   later[7] = 200
-  async function * firstSource() { yield good.subarray(0, 8); yield good.subarray(8) }
+  async function* firstSource() {
+    yield good.subarray(0, 8)
+    yield good.subarray(8)
+  }
   const first = parser.parseStream(firstSource())
   await first.next()
   await consume(parser, [later])
   await first.next()
   await first.next()
-  assert.deepEqual(parser.events.filter(e => e[0] === 'subtitle').map(e => e[1].time), [205, 105])
+  assert.deepEqual(
+    parser.events.filter(e => e[0] === 'subtitle').map(e => e[1].time),
+    [205, 105]
+  )
 })
 
 test('uses DefaultDuration in milliseconds without applying TimestampScale twice', async () => {
@@ -170,25 +221,37 @@ test('skips missing durations with one warning per track and still emits later t
 
 test('uses explicit BlockDuration before DefaultDuration and skips invalid durations', async () => {
   const parser = metadata({ _defaultDuration: 1500 })
-  const group = duration => ({ Children: [
-    { id: EbmlTagId.Block, track: 1, value: 5, payload: Buffer.from('hello') },
-    ...(duration == null ? [] : [{ id: EbmlTagId.BlockDuration, data: duration }])
-  ] })
+  const group = duration => ({
+    Children: [
+      { id: EbmlTagId.Block, track: 1, value: 5, payload: Buffer.from('hello') },
+      ...(duration == null ? [] : [{ id: EbmlTagId.BlockDuration, data: duration }])
+    ]
+  })
   await parser.handleBlockGroup(group(100), 2, 100)
   await parser.handleBlockGroup(group(undefined), 2, 100)
   await parser.handleBlockGroup(group(NaN), 2, 100)
-  assert.deepEqual(parser.events.filter(e => e[0] === 'subtitle').map(e => e[1].duration), [200, 1_500])
+  assert.deepEqual(
+    parser.events.filter(e => e[0] === 'subtitle').map(e => e[1].duration),
+    [200, 1_500]
+  )
   assert.equal(warnings(parser).length, 1)
 })
 
 test('extracts track DefaultDuration from nanoseconds', async () => {
   const parser = metadata()
   parser.tracks = undefined
-  parser.readSeekHeadTag = async () => ({ Children: [{ id: EbmlTagId.TrackEntry, Children: [
-    { id: EbmlTagId.TrackType, data: 0x11 },
-    { id: EbmlTagId.TrackNumber, data: 1 },
-    { id: EbmlTagId.CodecID, data: 'S_TEXT/UTF8' },
-    { id: EbmlTagId.DefaultDuration, data: 1_500_000_000 }
-  ] }] })
+  parser.readSeekHeadTag = async () => ({
+    Children: [
+      {
+        id: EbmlTagId.TrackEntry,
+        Children: [
+          { id: EbmlTagId.TrackType, data: 0x11 },
+          { id: EbmlTagId.TrackNumber, data: 1 },
+          { id: EbmlTagId.CodecID, data: 'S_TEXT/UTF8' },
+          { id: EbmlTagId.DefaultDuration, data: 1_500_000_000 }
+        ]
+      }
+    ]
+  })
   assert.equal((await parser.getTracks())[0]._defaultDuration, 1_500)
 })

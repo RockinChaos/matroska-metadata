@@ -23,12 +23,16 @@ class FileLike extends EventEmitter {
    * @returns {AsyncIterator<Uint8Array>}
    */
   [Symbol.asyncIterator](options = {}) {
-    return /** @type {AsyncIterator<Uint8Array>} */ (createReadStream(this.filename, { start: options.start || 0 })[Symbol.asyncIterator]())
+    return /** @type {AsyncIterator<Uint8Array>} */ (
+      createReadStream(this.filename, { start: options.start || 0 })[Symbol.asyncIterator]()
+    )
   }
 }
 
 const mediaDirectory = path.resolve('media')
-const mediaFiles = readdirSync(mediaDirectory).filter(filename => /\.(mkv|webm)$/i.test(filename)).sort()
+const mediaFiles = readdirSync(mediaDirectory)
+  .filter(filename => /\.(mkv|webm)$/i.test(filename))
+  .sort()
 
 /**
  * @param {Partial<SubtitleTrack>} [overrides]
@@ -62,7 +66,7 @@ function captureEmits(metadata, emitted) {
  * @returns {AsyncGenerator<Uint8Array>}
  */
 function createStream() {
-  return (async function * () {})()
+  return (async function* () {})()
 }
 
 /**
@@ -128,10 +132,12 @@ test('returns chapter timestamps in milliseconds and scales the final duration f
     id: EbmlTagId.Chapters,
     absoluteStart: 0,
     tagHeaderLength: 0,
-    Children: [{
-      id: EbmlTagId.EditionEntry,
-      Children: [chapter(5_000_000_000), chapter(8_000_000_000)]
-    }]
+    Children: [
+      {
+        id: EbmlTagId.EditionEntry,
+        Children: [chapter(5_000_000_000), chapter(8_000_000_000)]
+      }
+    ]
   }
   const metadata = Object.assign(Object.create(Metadata.prototype), {
     timecodeScale: 2,
@@ -156,14 +162,25 @@ test('streams subtitle events through a WebTorrent-style iterator callback', asy
   captureEmits(metadata, emitted)
 
   const cluster = Uint8Array.from([
-    0x1f, 0x43, 0xb6, 0x75, 0x8e,
-    0xe7, 0x81, 100,
-    0xa3, 0x89, 0x81, 0x00, 0x05, 0x80,
+    0x1f,
+    0x43,
+    0xb6,
+    0x75,
+    0x8e,
+    0xe7,
+    0x81,
+    100,
+    0xa3,
+    0x89,
+    0x81,
+    0x00,
+    0x05,
+    0x80,
     ...Buffer.from('hello')
   ])
   const chunks = [cluster.slice(0, 3), cluster.slice(3)]
-  async function * iterator() {
-    yield * chunks
+  async function* iterator() {
+    yield* chunks
   }
 
   const file = new EventEmitter()
@@ -193,16 +210,29 @@ test('applies a non-default TimecodeScale while streaming subtitles', async () =
 
   const timecodeScale = Uint8Array.of(0x2a, 0xd7, 0xb1, 0x84, 0x00, 0x1e, 0x84, 0x80)
   const cluster = Uint8Array.from([
-    0x1f, 0x43, 0xb6, 0x75, 0x8e,
-    0xe7, 0x81, 100,
-    0xa3, 0x89, 0x81, 0x00, 0x05, 0x80,
+    0x1f,
+    0x43,
+    0xb6,
+    0x75,
+    0x8e,
+    0xe7,
+    0x81,
+    100,
+    0xa3,
+    0x89,
+    0x81,
+    0x00,
+    0x05,
+    0x80,
     ...Buffer.from('hello')
   ])
-  async function * chunks() {
+  async function* chunks() {
     yield Buffer.concat([timecodeScale, cluster])
   }
 
-  for await (const _ of metadata.parseStream(chunks(), true)) {}
+  for await (const _ of metadata.parseStream(chunks(), true)) {
+    // Consume the stream to collect emitted subtitles
+  }
 
   assert.equal(metadata.timecodeScale, 2)
   assert.equal(emitted[0][1].time, 210)
@@ -224,13 +254,15 @@ test('returns only AttachedFile entries', async () => {
     tagHeaderLength: 0,
     Children: [{ id: EbmlTagId.CRC32 }, attachment]
   }
-  const metadata = Object.assign(Object.create(Metadata.prototype), {readSeekHeadTag: readSeekHeadTag(attachments)})
+  const metadata = Object.assign(Object.create(Metadata.prototype), { readSeekHeadTag: readSeekHeadTag(attachments) })
 
-  assert.deepEqual(await metadata.getAttachments(), [{
-    filename: 'subtitle-font.ttf',
-    mimetype: 'font/ttf',
-    data: Uint8Array.of(1, 2, 3)
-  }])
+  assert.deepEqual(await metadata.getAttachments(), [
+    {
+      filename: 'subtitle-font.ttf',
+      mimetype: 'font/ttf',
+      data: Uint8Array.of(1, 2, 3)
+    }
+  ])
 })
 
 test('does not emit subtitles after destruction', async () => {
@@ -251,7 +283,7 @@ test('prepends header-stripping settings to subtitle blocks', async () => {
   const emitted = []
   metadata.destroyed = false
   metadata.tracks = Promise.resolve([])
-  metadata.subtitleTracks = new Map([[1, createSubtitleTrack({_headerStrip: Buffer.from('prefix: ')})]])
+  metadata.subtitleTracks = new Map([[1, createSubtitleTrack({ _headerStrip: Buffer.from('prefix: ') })]])
   captureEmits(metadata, emitted)
 
   await metadata.handleBlock({ track: 1, value: 0, payload: Buffer.from('subtitle') }, 1, 0)
@@ -264,27 +296,31 @@ test('ignores compression that applies only to CodecPrivate', async () => {
     id: EbmlTagId.Tracks,
     absoluteStart: 0,
     tagHeaderLength: 0,
-    Children: [{
-      id: EbmlTagId.TrackEntry,
-      Children: [
-        { id: EbmlTagId.TrackType, data: 0x11 },
-        { id: EbmlTagId.TrackNumber, data: 1 },
-        { id: EbmlTagId.CodecID, data: 'S_TEXT/UTF8' },
-        {
-          id: EbmlTagId.ContentEncodings,
-          Children: [{
-            id: EbmlTagId.ContentEncoding,
+    Children: [
+      {
+        id: EbmlTagId.TrackEntry,
+        Children: [
+          { id: EbmlTagId.TrackType, data: 0x11 },
+          { id: EbmlTagId.TrackNumber, data: 1 },
+          { id: EbmlTagId.CodecID, data: 'S_TEXT/UTF8' },
+          {
+            id: EbmlTagId.ContentEncodings,
             Children: [
-              { id: EbmlTagId.ContentEncodingScope, data: 2 },
               {
-                id: EbmlTagId.ContentCompression,
-                Children: [{ id: EbmlTagId.ContentCompAlgo, data: 0 }]
+                id: EbmlTagId.ContentEncoding,
+                Children: [
+                  { id: EbmlTagId.ContentEncodingScope, data: 2 },
+                  {
+                    id: EbmlTagId.ContentCompression,
+                    Children: [{ id: EbmlTagId.ContentCompAlgo, data: 0 }]
+                  }
+                ]
               }
             ]
-          }]
-        }
-      ]
-    }]
+          }
+        ]
+      }
+    ]
   }
   const metadata = Object.assign(Object.create(Metadata.prototype), {
     tracks: undefined,
@@ -303,14 +339,16 @@ test('finds subtitle tracks in files without a SeekHead', async () => {
     id: EbmlTagId.Tracks,
     absoluteStart: 0,
     tagHeaderLength: 0,
-    Children: [{
-      id: EbmlTagId.TrackEntry,
-      Children: [
-        { id: EbmlTagId.TrackType, data: 0x11 },
-        { id: EbmlTagId.TrackNumber, data: 1 },
-        { id: EbmlTagId.CodecID, data: 'S_TEXT/UTF8' }
-      ]
-    }]
+    Children: [
+      {
+        id: EbmlTagId.TrackEntry,
+        Children: [
+          { id: EbmlTagId.TrackType, data: 0x11 },
+          { id: EbmlTagId.TrackNumber, data: 1 },
+          { id: EbmlTagId.CodecID, data: 'S_TEXT/UTF8' }
+        ]
+      }
+    ]
   }
   let requestedStart
   // noinspection JSUnusedGlobalSymbols
@@ -329,18 +367,20 @@ test('finds subtitle tracks in files without a SeekHead', async () => {
     })
   })
 
-  assert.deepEqual(await metadata.getTracks(), [{
-    number: 1,
-    language: 'eng',
-    type: 'utf8',
-    default: true,
-    forced: false,
-    name: undefined,
-    header: undefined,
-    _defaultDuration: undefined,
-    _compressed: false,
-    _headerStrip: undefined
-  }])
+  assert.deepEqual(await metadata.getTracks(), [
+    {
+      number: 1,
+      language: 'eng',
+      type: 'utf8',
+      default: true,
+      forced: false,
+      name: undefined,
+      header: undefined,
+      _defaultDuration: undefined,
+      _compressed: false,
+      _headerStrip: undefined
+    }
+  ])
 })
 
 test('recognizes legacy SSA codec IDs', async () => {
@@ -348,14 +388,16 @@ test('recognizes legacy SSA codec IDs', async () => {
     id: EbmlTagId.Tracks,
     absoluteStart: 0,
     tagHeaderLength: 0,
-    Children: [{
-      id: EbmlTagId.TrackEntry,
-      Children: [
-        { id: EbmlTagId.TrackType, data: 0x11 },
-        { id: EbmlTagId.TrackNumber, data: 1 },
-        { id: EbmlTagId.CodecID, data: 'S_ASS' }
-      ]
-    }]
+    Children: [
+      {
+        id: EbmlTagId.TrackEntry,
+        Children: [
+          { id: EbmlTagId.TrackType, data: 0x11 },
+          { id: EbmlTagId.TrackNumber, data: 1 },
+          { id: EbmlTagId.CodecID, data: 'S_ASS' }
+        ]
+      }
+    ]
   }
   // noinspection JSUnusedGlobalSymbols
   const metadata = Object.assign(Object.create(Metadata.prototype), {
@@ -402,6 +444,5 @@ for (const filename of mediaFiles) {
     let byteLength = 0
     for await (const chunk of parsedIterator) byteLength += chunk.length
     assert.ok(byteLength > 0)
-
   })
 }

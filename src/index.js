@@ -72,9 +72,11 @@ export default class Metadata extends Util {
   currentClusterTimecode = null
   /** @type {boolean} */
   destroyed = false
+  /** @type {Set<number> | undefined} */
+  durationWarnings
 
   /**
-   * @param {Blob | {[Symbol.asyncIterator]: (options?: {start?: number}) => AsyncIterator<Uint8Array>}} file
+   * @param {import('./util.js').MetadataFile} file
    * @param {{maxBufferedBytes?: number}} [options]
    */
   constructor(file, options = {}) {
@@ -84,7 +86,7 @@ export default class Metadata extends Util {
       throw new RangeError('maxBufferedBytes must be a positive safe integer')
     }
     this.file = file
-    this.implementsSlice = !!file.slice
+    this.implementsSlice = 'slice' in file && typeof file.slice === 'function'
     this.segment = this.getSegment()
     this.seekHead = this.getSeekHead()
     this.duration = this.getDuration()
@@ -94,13 +96,15 @@ export default class Metadata extends Util {
   /** @returns {Promise<{filename: string, mimetype: string, data: Uint8Array}[]>} */
   async getAttachments() {
     if (this.destroyed) return []
-    return (await this.readSeekHeadTag('Attachments'))?.Children
-      ?.filter(chunk => chunk.id === EbmlTagId.AttachedFile)
-      .map((/** @type {import('@rockinchaos/ebml-iterator').EbmlMasterTag} */ chunk) => ({
-        filename: this.getData(chunk, EbmlTagId.FileName),
-        mimetype: this.getData(chunk, EbmlTagId.FileMimeType),
-        data: this.getData(chunk, EbmlTagId.FileData)
-      })) || []
+    return (
+      (await this.readSeekHeadTag('Attachments'))?.Children?.filter(chunk => chunk.id === EbmlTagId.AttachedFile).map(
+        (/** @type {import('@rockinchaos/ebml-iterator').EbmlMasterTag} */ chunk) => ({
+          filename: this.getData(chunk, EbmlTagId.FileName),
+          mimetype: this.getData(chunk, EbmlTagId.FileMimeType),
+          data: this.getData(chunk, EbmlTagId.FileData)
+        })
+      ) || []
+    )
   }
 
   /** @returns {Promise<SubtitleTrack[]>} */
@@ -108,7 +112,8 @@ export default class Metadata extends Util {
     if (this.destroyed) return []
     if (this.tracks) return await this.tracks
 
-    const Tracks = (await this.readSeekHeadTag('Tracks')) || await this.readUntilTag(this.getFileStream(this.segmentStart), EbmlTagId.Tracks)
+    const Tracks =
+      (await this.readSeekHeadTag('Tracks')) || (await this.readUntilTag(this.getFileStream(this.segmentStart), EbmlTagId.Tracks))
     if (this.destroyed || !Tracks?.Children?.length) return []
 
     for (const entry of Tracks.Children.filter(c => c.id === EbmlTagId.TrackEntry)) {
@@ -128,7 +133,9 @@ export default class Metadata extends Util {
       if (type) {
         const header = this.getData(entry, EbmlTagId.CodecPrivate)
         const defaultDuration = this.getData(entry, EbmlTagId.DefaultDuration)
-        const encoding = entry.Children?.find(c => c.id === EbmlTagId.ContentEncodings)?.Children?.find(c => c.id === EbmlTagId.ContentEncoding)
+        const encoding = entry.Children?.find(c => c.id === EbmlTagId.ContentEncodings)?.Children?.find(
+          c => c.id === EbmlTagId.ContentEncoding
+        )
         const compression = this.getChild(encoding, EbmlTagId.ContentCompression)
         const compressionAlgorithm = this.getData(compression, EbmlTagId.ContentCompAlgo) ?? 0
         const compressionScope = this.getData(encoding, EbmlTagId.ContentEncodingScope) ?? 1
@@ -145,7 +152,10 @@ export default class Metadata extends Util {
           // Matroska defaults ContentCompAlgo to zlib (0). Algorithm 3 is
           // header stripping, which prepends ContentCompSettings instead.
           _compressed: Boolean(compressionAppliesToBlocks && compression && compressionAlgorithm === 0),
-          _headerStrip: compressionAppliesToBlocks && compressionAlgorithm === 3 ? this.getData(compression, EbmlTagId.ContentCompSettings) : undefined
+          _headerStrip:
+            compressionAppliesToBlocks && compressionAlgorithm === 3
+              ? this.getData(compression, EbmlTagId.ContentCompSettings)
+              : undefined
         }
 
         this.subtitleTracks.set(track.number, track)
@@ -163,7 +173,7 @@ export default class Metadata extends Util {
 
     let timecodeScale = this.timecodeScale
     if (!timecodeScale) {
-      timecodeScale = ((await this.readUntilTag(this.getFileStream(), EbmlTagId.TimecodeScale))?.data / 1_000_000) || 1
+      timecodeScale = (await this.readUntilTag(this.getFileStream(), EbmlTagId.TimecodeScale))?.data / 1_000_000 || 1
       this.timecodeScale = timecodeScale
     }
 
@@ -173,21 +183,27 @@ export default class Metadata extends Util {
 
     // https://www.matroska.org/technical/chapters.html#default-edition
     // finds first default edition, or first entry
-    const defaultEdition = editions.find(c => {
-      return c.Children.some(cc => {
-        return cc.id === EbmlTagId.EditionFlagDefault && Boolean(cc.data)
-      })
-    }) || editions[0]
+    const defaultEdition =
+      editions.find(c => {
+        return c.Children.some(cc => {
+          return cc.id === EbmlTagId.EditionFlagDefault && Boolean(cc.data)
+        })
+      }) || editions[0]
 
     // exclude hidden atoms
     if (!defaultEdition?.Children?.length) return []
 
-    const atoms = defaultEdition.Children.filter(c => c.id === EbmlTagId.ChapterAtom && !this.getData(c, EbmlTagId.ChapterFlagHidden))
+    const atoms = defaultEdition.Children.filter(
+      c => c.id === EbmlTagId.ChapterAtom && !this.getData(c, EbmlTagId.ChapterFlagHidden)
+    )
 
     const chapters = []
     for (let i = atoms.length - 1; i >= 0; --i) {
       const start = this.getData(atoms[i], EbmlTagId.ChapterTimeStart) / 1_000_000
-      const end = (this.getData(atoms[i], EbmlTagId.ChapterTimeEnd) / 1_000_000) || chapters[i + 1]?.start || ((await this.duration || 0) * timecodeScale)
+      const end =
+        this.getData(atoms[i], EbmlTagId.ChapterTimeEnd) / 1_000_000 ||
+        chapters[i + 1]?.start ||
+        ((await this.duration) || 0) * timecodeScale
       const display = this.getChild(atoms[i], EbmlTagId.ChapterDisplay)
       chapters[i] = {
         start,
@@ -203,7 +219,8 @@ export default class Metadata extends Util {
   /** @returns {Promise<number | undefined>} */
   async getDuration() {
     if (this.duration) return this.duration
-    const Info = (await this.readSeekHeadTag('Info')) || await this.readUntilTag(this.getFileStream(this.segmentStart), EbmlTagId.Info)
+    const Info =
+      (await this.readSeekHeadTag('Info')) || (await this.readUntilTag(this.getFileStream(this.segmentStart), EbmlTagId.Info))
 
     if (this.destroyed || !Info?.Children?.length) return undefined
     const timecodeScale = this.getData(Info, EbmlTagId.TimecodeScale)
@@ -222,7 +239,7 @@ export default class Metadata extends Util {
     await this.tracks
     if (this.destroyed) return
 
-    const block = /** @type {SubtitleBlock | undefined} */ (this.getChild(chunk, EbmlTagId.Block))
+    const block = /** @type {import('@rockinchaos/ebml-iterator').Block | undefined} */ (this.getChild(chunk, EbmlTagId.Block))
     if (block && this.subtitleTracks.has(block.track)) {
       const blockDuration = this.getData(chunk, EbmlTagId.BlockDuration)
       const track = this.subtitleTracks.get(block.track)
@@ -247,15 +264,11 @@ export default class Metadata extends Util {
    * @param {AsyncIterable<Uint8Array>} stream
    * @param {boolean} [stable=false]
    */
-  async * parseStream(stream, stable = false) {
-    const createDecoder = () => new EbmlIteratorDecoder({
-      bufferTagIds: [
-        EbmlTagId.TimecodeScale,
-        EbmlTagId.BlockGroup,
-        EbmlTagId.SimpleBlock,
-        EbmlTagId.Timecode
-      ]
-    })
+  async *parseStream(stream, stable = false) {
+    const createDecoder = () =>
+      new EbmlIteratorDecoder({
+        bufferTagIds: [EbmlTagId.TimecodeScale, EbmlTagId.BlockGroup, EbmlTagId.SimpleBlock, EbmlTagId.Timecode]
+      })
     let decoder = createDecoder()
 
     let timecodeScale = this.timecodeScale || 1

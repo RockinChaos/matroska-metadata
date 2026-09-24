@@ -3,10 +3,7 @@ import { EbmlTagId, Tools } from '@rockinchaos/ebml-iterator'
 /** @type {number} Bound the bytes retained while acquiring a Cluster after a seek or error */
 export const CLUSTER_SEARCH_BYTES = 64 * 1_024
 /** @type {Set<number>} */
-const PREFIX_TAGS = new Set([
-  EbmlTagId.CRC32, EbmlTagId.Void, EbmlTagId.Position,
-  EbmlTagId.PrevSize, EbmlTagId.SilentTracks
-])
+const PREFIX_TAGS = new Set([EbmlTagId.CRC32, EbmlTagId.Void, EbmlTagId.Position, EbmlTagId.PrevSize, EbmlTagId.SilentTracks])
 
 /**
  * @param {Uint8Array} data
