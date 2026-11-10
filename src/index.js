@@ -111,6 +111,7 @@ export default class Metadata extends Util {
   async getTracks() {
     if (this.destroyed) return []
     if (this.tracks) return await this.tracks
+    if (this.segment && !(await this.segment)) return []
 
     const Tracks =
       (await this.readSeekHeadTag('Tracks')) || (await this.readUntilTag(this.getFileStream(this.segmentStart), EbmlTagId.Tracks))
@@ -168,6 +169,7 @@ export default class Metadata extends Util {
   /** @returns {Promise<{start: number, end: number, text: string | undefined, language: string | undefined}[]>} */
   async getChapters() {
     if (this.destroyed) return []
+    if (this.segment && !(await this.segment)) return []
     const Chapters = await this.readSeekHeadTag('Chapters')
     if (this.destroyed) return []
 
@@ -219,6 +221,7 @@ export default class Metadata extends Util {
   /** @returns {Promise<number | undefined>} */
   async getDuration() {
     if (this.duration) return this.duration
+    if (this.segment && !(await this.segment)) return undefined
     const Info =
       (await this.readSeekHeadTag('Info')) || (await this.readUntilTag(this.getFileStream(this.segmentStart), EbmlTagId.Info))
 
@@ -301,6 +304,12 @@ export default class Metadata extends Util {
 
     let buffer = new Uint8Array(0)
     for await (const chunk of stream) {
+      if (this.isEbml === undefined && this.segment) await this.segment
+      if (this.isEbml === false) {
+        yield chunk
+        if (this.destroyed) return null
+        continue
+      }
       let input = stable ? chunk : concat([buffer, chunk])
       let searchStart = 0
       while (true) {

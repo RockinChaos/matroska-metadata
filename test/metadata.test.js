@@ -89,6 +89,132 @@ function readUntilTag(result, onRead) {
   }
 }
 
+test('skips MP4 metadata and forwards playback chunks without parsing them', async () => {
+  const mp4 = Buffer.from('0000001c6674797069736f6d0000000169736f6d6176633169736f36', 'hex')
+  let requests = 0
+  let closed = false
+  const file = {
+    async *[Symbol.asyncIterator]() {
+      requests++
+      try {
+        await new Promise(resolve => setImmediate(resolve))
+        yield mp4
+        throw new Error('Unsupported files should not be read past the first chunk')
+      } finally {
+        closed = true
+      }
+    }
+  }
+  const metadata = new Metadata(file)
+  const emitted = []
+  captureEmits(metadata, emitted)
+
+  // Embedded Cluster bytes in another container must not be decoded as subtitles.
+  const cluster = Buffer.from('1f43b67588e78100a383820000', 'hex')
+  const chunks = [mp4, cluster]
+  for (const stable of [false, true]) {
+    async function* stream() {
+      yield* chunks
+    }
+    const forwarded = []
+    for await (const chunk of metadata.parseStream(stream(), stable)) forwarded.push(chunk)
+    assert.equal(forwarded.length, chunks.length)
+    for (let i = 0; i < chunks.length; i++) assert.strictEqual(forwarded[i], chunks[i])
+  }
+  assert.deepEqual(
+    await Promise.all([
+      metadata.segment,
+      metadata.seekHead,
+      metadata.duration,
+      metadata.tracks,
+      metadata.getChapters(),
+      metadata.getAttachments()
+    ]),
+    [undefined, null, undefined, [], [], []]
+  )
+  assert.equal(requests, 1)
+  assert.equal(closed, true)
+  assert.deepEqual(emitted, [])
+})
+
+test('handles empty, truncated, and unsupported headers in Blobs and split streams', async () => {
+  for (const hex of ['', '00', '1a', '1a45', '1a45df', '1a00', '1a4500', '1a45df00']) {
+    const input = Buffer.from(hex, 'hex')
+    const file = {
+      async *[Symbol.asyncIterator]() {
+        yield new Uint8Array(0)
+        for (const byte of input) {
+          yield Uint8Array.of(byte)
+          yield new Uint8Array(0)
+        }
+      }
+    }
+    for (const source of [file, new Blob([input])]) {
+      const metadata = new Metadata(source)
+      assert.deepEqual(
+        await Promise.all([
+          metadata.segment,
+          metadata.seekHead,
+          metadata.duration,
+          metadata.tracks,
+          metadata.getChapters(),
+          metadata.getAttachments()
+        ]),
+        [undefined, null, undefined, [], [], []],
+        hex
+      )
+    }
+  }
+})
+
+test('preserves the EBML header and Segment offset across split chunks', async () => {
+  const input = Buffer.from('1a45dfa3801853806780', 'hex')
+  for (const chunkSize of [1, 2, 3, 4, input.length]) {
+    const file = {
+      async *[Symbol.asyncIterator]({ start = 0 } = {}) {
+        yield new Uint8Array(0)
+        for (let offset = start; offset < input.length; offset += chunkSize) {
+          yield input.subarray(offset, offset + chunkSize)
+        }
+      }
+    }
+    for (const source of [file, new Blob([input])]) {
+      const metadata = new Metadata(source)
+      const [segment, seekHead, duration, tracks] = await Promise.all([
+        metadata.segment,
+        metadata.seekHead,
+        metadata.duration,
+        metadata.tracks
+      ])
+      assert.equal(segment.id, EbmlTagId.Segment)
+      assert.equal(segment.absoluteStart, 5)
+      assert.equal(metadata.segmentStart, 10)
+      assert.deepEqual(seekHead, {})
+      assert.equal(duration, undefined)
+      assert.deepEqual(tracks, [])
+    }
+  }
+})
+
+test('continues to reject source errors and malformed EBML', async () => {
+  const error = new Error('torrent read failed')
+  const file = {
+    async *[Symbol.asyncIterator]() {
+      yield Uint8Array.of(0x1a)
+      throw error
+    }
+  }
+  for (const source of [file, new Blob([Buffer.from('1a45dfa38000', 'hex')])]) {
+    const metadata = new Metadata(source)
+    const results = await Promise.allSettled([metadata.segment, metadata.seekHead, metadata.duration, metadata.tracks])
+    for (const result of results) {
+      assert.equal(result.status, 'rejected')
+      if (source === file) assert.strictEqual(result.reason, error)
+      else assert.match(result.reason.message, /Unrepresentable length: Infinity/)
+    }
+  }
+})
+
 test('loads indexed tags from their seek-head offset', async () => {
   /** @type {DecodedTag} */
   const expected = { id: EbmlTagId.Info, absoluteStart: 0, tagHeaderLength: 0 }

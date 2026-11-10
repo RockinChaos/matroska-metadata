@@ -33,6 +33,8 @@ export default class Util extends EventEmitter {
   implementsSlice = false
   /** @type {boolean} */
   destroyed = false
+  /** @type {boolean | undefined} */
+  isEbml
 
   /**
    * @param {EbmlTag | null | undefined} chunk
@@ -141,7 +143,20 @@ export default class Util extends EventEmitter {
   async getSegment() {
     if (this.segment) return await this.segment
 
-    const segment = await this.readUntilTag(this.getFileStream(), EbmlTagId.Segment, false)
+    const stream = this.getFileStream()
+    async function* ebmlStream() {
+      const signature = [0x1a, 0x45, 0xdf, 0xa3]
+      let matched = 0
+      for await (const chunk of stream) {
+        for (let i = 0; i < chunk.length && matched < signature.length; i++) {
+          if (chunk[i] !== signature[matched++]) return
+        }
+        yield chunk
+      }
+    }
+
+    const segment = await this.readUntilTag(ebmlStream(), EbmlTagId.Segment, false)
+    this.isEbml = Boolean(segment)
     if (!segment) return
     this.segmentStart = segment.absoluteStart + segment.tagHeaderLength
     return segment
@@ -151,7 +166,7 @@ export default class Util extends EventEmitter {
   async getSeekHead() {
     if (this.seekHead) return await this.seekHead
 
-    await this.segment
+    if (!(await this.segment)) return null
     const seekHeadStream = this.getFileStream(this.segmentStart)
     return await this.readSeekHead(seekHeadStream, this.segmentStart)
   }
